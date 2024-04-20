@@ -1,0 +1,76 @@
+name: Create goldten test pull request
+
+on:
+  pull_request:
+    types: [opened, synchronize]
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      - name: "Checkout"
+        uses: actions/checkout@v4
+
+      - uses: ./.github/actions/install_flutter_dependencies
+
+      - name: Config git
+        run: |
+          git config user.name "GitHub Action"
+          git config user.email "github-action@github.com"
+
+      # 現在のブランチと作成するブランチの名前をセットする
+      - name: Set branch name
+        run: |
+          echo "current_branch=${{ github.head_ref }}" >> $GITHUB_ENV
+          echo "create_branch_name=${{ github.head_ref }}-update-golden" >> $GITHUB_ENV
+          if  git ls-remote --heads origin $create_branch_name = ""  ; then
+            echo "branch_exists=false" >> $GITHUB_ENV
+          else
+            echo "branch_exists=true" >> $GITHUB_ENV
+          fi
+
+      # ブランチの作成。
+      # すでにリモートにブランチが存在する場合はそのブランチに切り替える。
+      # ブランチが存在しない場合は新規作成する。
+      - name: Create new feature branch
+        run: |
+          if [ ${branch_exists} = "true" ]; then
+            git branch $create_branch_name origin/$create_branch_name
+          else
+            git checkout -b feature/update-pubspec
+          fi
+
+      # Goldenファイルの更新をし、変更があるかどうかを確認する
+      - name: "Update golden file and check changes"
+        run: |
+          flutter test --update-goldens
+          if $(git status --porcelain) = "" ; then
+            echo "no_changes=true" >> $GITHUB_ENV
+          else
+            echo "no_changes=false" >> $GITHUB_ENV
+          fi
+
+      # ファイルチェンジがある場合のみコミットとプッシュを行う
+      - name: git add, commit and push
+        if: env.no_changes == 'false'
+        run: |
+          git add .
+          git commit -m "Update golden test"
+          if [ ${{ steps.check_branch.outputs.branch_exists }} = "true" ]; then
+            git push
+          else
+            git push origin feature/update-pubspec
+          fi
+
+      # # TODO: リポ名を汎用的にする
+      # - name: create Pull Request to flutter-repo
+      #   if: env.branch_exists == 'false' && env.no_changes == 'false'
+      #   run: |
+      #     gh pr create \
+      #       --title "update goldten test" \
+      #       --repo imajoriri/tokeru \
+      #       --body "update goldten test" \
+      #       --base ${{ steps.check_branch.outputs.current_branch }} \
+      #       --head ${{ steps.check_branch.outputs.create_branch_name }} \
+      #   env:
+      #     GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
